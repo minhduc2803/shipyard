@@ -1,0 +1,10 @@
+# runtime artefacts — never committed
+/state/
+/run/
+/logs/
+/locks/
+# real secrets (template is tracked)
+/config/secrets.env
+.DS_Store
+# dashboard
+/dashboard/node_modules/
