@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useLanes } from './hooks/useLanes.js';
 import { useProof } from './hooks/useProof.js';
 import { useReviews } from './hooks/useReviews.js';
-import { postAction } from './lib/api.js';
+import { postAction, deleteProof } from './lib/api.js';
 import Header from './components/Header.jsx';
 import LaneGrid from './components/LaneGrid.jsx';
 import PipelineMap from './components/PipelineMap.jsx';
@@ -95,6 +95,28 @@ export default function App() {
     setCredsModal({ lane: n, mode });
   }, []);
 
+  const handleCleanup = useCallback((n, payload, label, after) => {
+    setConfirm({
+      lane: n,
+      title: 'Delete screenshots?',
+      message: `Permanently delete ${label}? This cannot be undone.`,
+      confirmLabel: 'Delete',
+      confirmCls: 'warn',
+      onConfirm: async () => {
+        try {
+          if (payload._multi) {
+            for (const [group, images] of Object.entries(payload._multi))
+              await deleteProof(n, { slug: payload.slug, group, images });
+          } else {
+            await deleteProof(n, payload);
+          }
+        } catch { /* gallery refresh below reflects truth */ }
+        if (after) after();
+        loadProof(n, true);
+      },
+    });
+  }, [loadProof]);
+
   const openShot = useCallback((slug, g, ix) => {
     if (!proof) return;
     const f = proof.features.find(x => x.slug === slug);
@@ -138,7 +160,8 @@ export default function App() {
             <PipelineMap lane={mapLane} config={config} archived={viewingPast} />
             <div className="mapwrap" style={{ padding: '0 18px 6px', marginTop: '-12px', borderTop: 'none', boxShadow: 'none', background: 'transparent' }}>
               <ProofGallery proof={proof} selectedLane={selectedLane} selectedSlug={selectedSlug}
-                onSelectFeature={selectFeature} onShot={openShot} onGallery={openGallery} />
+                onSelectFeature={selectFeature} onShot={openShot} onGallery={openGallery}
+                onCleanup={handleCleanup} />
             </div>
           </>
         )
@@ -149,6 +172,8 @@ export default function App() {
 
       {confirm && (
         <ConfirmModal lane={confirm.lane} action={confirm.action}
+          title={confirm.title} message={confirm.message}
+          confirmLabel={confirm.confirmLabel} confirmCls={confirm.confirmCls}
           onConfirm={confirm.onConfirm} onClose={() => setConfirm(null)} />
       )}
       {credsModal && (

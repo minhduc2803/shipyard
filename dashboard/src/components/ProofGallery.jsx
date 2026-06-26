@@ -11,15 +11,25 @@ function handleImgError(e) {
   e.target.style.background = '#1a2029';
 }
 
-export default function ProofGallery({ proof, selectedLane, selectedSlug, onSelectFeature, onShot, onGallery }) {
+export default function ProofGallery({ proof, selectedLane, selectedSlug, onSelectFeature, onShot, onGallery, onCleanup }) {
+  const [cleanup, setCleanup] = React.useState(false);
+  const [selected, setSelected] = React.useState(() => new Set());
+
+  // reset selection when feature changes or cleanup mode turns off
+  React.useEffect(() => { setSelected(new Set()); }, [selectedSlug]);
+  React.useEffect(() => { if (!cleanup) setSelected(new Set()); }, [cleanup]);
+
+  const toggleSel = (key) => setSelected(prev => {
+    const next = new Set(prev);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
+
   if (!proof) return <span className="pf-empty">loading proof…</span>;
   const n = selectedLane;
   const sel = selectedSlug;
   const d = proof;
 
-  // build picker options — show the feature_title for the slug-less pending feature
-  // (a freshly-started current feature with no branch/slug yet); slug otherwise so it
-  // matches the proof-dir names.
   const featBySlug = new Map((d.features || []).map(x => [x.slug, x]));
   const labelOf = (slug) => {
     const t = featBySlug.get(slug)?.state?.feature_title;
@@ -37,6 +47,7 @@ export default function ProofGallery({ proof, selectedLane, selectedSlug, onSele
   });
 
   const f = (d.features || []).find(x => x.slug === sel);
+  const hasShots = !!(f && Object.keys(f.groups || {}).length);
 
   const picker = opts.length > 1 ? (
     <select className="pf-sel" value={sel} onChange={e => onSelectFeature(n, e.target.value)}
@@ -58,10 +69,22 @@ export default function ProofGallery({ proof, selectedLane, selectedSlug, onSele
           {'\u{1F3AB}'} task report {'↗'}
         </a>
       )}
+      {hasShots && (
+        <button className={`pf-clean${cleanup ? ' on' : ''}`} onClick={() => setCleanup(c => !c)}
+          title="toggle screenshot cleanup mode">
+          {cleanup ? '✓ done' : '🧹 clean up'}
+        </button>
+      )}
+      {hasShots && cleanup && (
+        <button className="pf-clear-all warn"
+          onClick={() => onCleanup(n, { slug: f.slug }, `all screenshots for "${labelOf(f.slug)}"`)}
+          title="delete every screenshot for this feature">
+          clear all screenshots
+        </button>
+      )}
     </>
   );
 
-  // archived state bar for past features
   let stateBar = null;
   if (f && f.state && sel !== d._cur) {
     const st = f.state;
@@ -81,8 +104,7 @@ export default function ProofGallery({ proof, selectedLane, selectedSlug, onSele
     );
   }
 
-  if (!f || !Object.keys(f.groups || {}).length) {
-    // current/just-started feature (or a past one) that has no screenshots yet
+  if (!hasShots) {
     return (
       <div className="proof">
         <div className="pf-feat">{head}{stateBar}</div>
@@ -91,6 +113,17 @@ export default function ProofGallery({ proof, selectedLane, selectedSlug, onSele
     );
   }
 
+  const deleteSelected = () => {
+    const byGroup = {};
+    for (const k of selected) {
+      const i = k.indexOf('/');
+      const g = k.slice(0, i), img = k.slice(i + 1);
+      (byGroup[g] ||= []).push(img);
+    }
+    onCleanup(n, { slug: f.slug, _multi: byGroup }, `${selected.size} selected screenshot${selected.size > 1 ? 's' : ''}`,
+      () => setSelected(new Set()));
+  };
+
   const CAP = 8;
   return (
     <div className="proof">
@@ -98,19 +131,35 @@ export default function ProofGallery({ proof, selectedLane, selectedSlug, onSele
         {head}
         {stateBar}
         {Object.entries(f.groups).map(([g, imgs]) => {
-          const vis = imgs.length > CAP ? imgs.slice(0, CAP - 1) : imgs;
+          const vis = cleanup ? imgs : (imgs.length > CAP ? imgs.slice(0, CAP - 1) : imgs);
           return (
             <div className="pf-grp" key={g}>
-              <span className="pf-g">{g} · {imgs.length}</span>
+              <span className="pf-g">{g} · {imgs.length}
+                {cleanup && (
+                  <button className="pf-del-grp" title={`delete the whole ${g} group`}
+                    onClick={() => onCleanup(n, { slug: f.slug, group: g }, `the entire "${g}" group (${imgs.length} screenshot${imgs.length > 1 ? 's' : ''})`)}>
+                    🗑
+                  </button>
+                )}
+              </span>
               <div className="pf-thumbs">
-                {vis.map((img, ix) => (
-                  <a key={img} href={imgUrl(n, f.slug, g, img)}
-                    onClick={e => { e.preventDefault(); onShot(f.slug, g, imgs.indexOf(img)); }}
-                    title={`${img} — click to preview`}>
-                    <img loading="lazy" src={imgUrl(n, f.slug, g, img)} onError={handleImgError} />
-                  </a>
-                ))}
-                {imgs.length > CAP && (
+                {vis.map((img) => {
+                  const key = `${g}/${img}`;
+                  const isSel = cleanup && selected.has(key);
+                  return (
+                    <a key={img} href={imgUrl(n, f.slug, g, img)}
+                      className={isSel ? 'sel' : ''}
+                      onClick={e => {
+                        e.preventDefault();
+                        if (cleanup) toggleSel(key); else onShot(f.slug, g, imgs.indexOf(img));
+                      }}
+                      title={cleanup ? `${img} — click to select` : `${img} — click to preview`}>
+                      <img loading="lazy" src={imgUrl(n, f.slug, g, img)} onError={handleImgError} />
+                      {cleanup && <span className="pf-check">{isSel ? '☑' : '☐'}</span>}
+                    </a>
+                  );
+                })}
+                {!cleanup && imgs.length > CAP && (
                   <a className="pf-more" onClick={() => onGallery(f.slug, g)}
                     title={`show all ${imgs.length} screenshots`}>
                     +{imgs.length - (CAP - 1)}
@@ -121,6 +170,13 @@ export default function ProofGallery({ proof, selectedLane, selectedSlug, onSele
           );
         })}
       </div>
+      {cleanup && selected.size > 0 && (
+        <div className="pf-bar">
+          <span>{selected.size} selected</span>
+          <button className="warn" onClick={deleteSelected}>delete {selected.size} selected</button>
+          <button onClick={() => setSelected(new Set())}>clear selection</button>
+        </div>
+      )}
     </div>
   );
 }
