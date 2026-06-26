@@ -170,3 +170,70 @@ export function proofFile(n, relpath) {
   }
   return null;
 }
+
+function countFiles(dir) {
+  let c = 0;
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (e.isDirectory()) c += countFiles(path.join(dir, e.name));
+    else c++;
+  }
+  return c;
+}
+
+const badName = (s) =>
+  !s || typeof s !== 'string' || s.includes('/') || s.includes('\\') || s.includes('..');
+
+// Delete proof SCREENSHOTS for lane n at one of three granularities:
+//   { slug, group, images:[...] } -> unlink those files (then prune empty group)
+//   { slug, group }               -> remove the whole group dir
+//   { slug }                      -> remove every image group dir (keeps ticket/)
+// Never touches the `ticket` group, state JSON, or anything outside proofBase(n).
+export function deleteProof(n, { slug, group, images } = {}) {
+  if (badName(slug)) throw new Error('invalid slug');
+
+  let base;
+  try { base = fs.realpathSync(proofBase(n)); }
+  catch { throw new Error('no proof for this lane'); }
+  const inBase = (p) => p === base || p.startsWith(base + path.sep);
+
+  let featDir;
+  try { featDir = fs.realpathSync(path.join(base, slug)); }
+  catch { throw new Error('feature not found'); }
+  if (!inBase(featDir) || !fs.statSync(featDir).isDirectory())
+    throw new Error('invalid feature dir');
+
+  let deleted = 0;
+
+  if (group !== undefined) {
+    if (badName(group) || group === 'ticket') throw new Error('invalid group');
+    let grpDir;
+    try { grpDir = fs.realpathSync(path.join(featDir, group)); }
+    catch { throw new Error('group not found'); }
+    if (!inBase(grpDir) || !fs.statSync(grpDir).isDirectory())
+      throw new Error('invalid group dir');
+
+    if (Array.isArray(images) && images.length) {
+      for (const img of images) {
+        if (badName(img) || !/\.(png|jpg|jpeg)$/i.test(img)) throw new Error('invalid image');
+        let f;
+        try { f = fs.realpathSync(path.join(grpDir, img)); } catch { continue; }
+        if (inBase(f) && fs.statSync(f).isFile() && /\.(png|jpg|jpeg)$/i.test(f)) {
+          fs.unlinkSync(f); deleted++;
+        }
+      }
+      try { if (!fs.readdirSync(grpDir).length) fs.rmdirSync(grpDir); } catch { /* ok */ }
+    } else {
+      deleted = countFiles(grpDir);
+      fs.rmSync(grpDir, { recursive: true, force: true });
+    }
+  } else {
+    for (const e of fs.readdirSync(featDir, { withFileTypes: true })) {
+      if (!e.isDirectory() || e.name === 'ticket') continue;
+      const g = path.join(featDir, e.name);
+      deleted += countFiles(g);
+      fs.rmSync(g, { recursive: true, force: true });
+    }
+  }
+
+  return { ok: true, deleted };
+}
