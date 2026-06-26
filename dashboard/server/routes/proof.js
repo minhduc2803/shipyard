@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import path from 'path';
-import { proofPayload, proofFile } from '../services/proof.js';
+import { proofPayload, proofFile, deleteProof } from '../services/proof.js';
 import { reviewsPayload } from '../services/reviews.js';
 
 const router = Router();
@@ -18,6 +18,14 @@ router.get('/api/reviews/:n(\\d)', (req, res) => {
     res.json(reviewsPayload(parseInt(req.params.n, 10)));
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.delete('/api/proof/:n(\\d)', (req, res) => {
+  try {
+    res.json(deleteProof(parseInt(req.params.n, 10), req.body || {}));
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message });
   }
 });
 
